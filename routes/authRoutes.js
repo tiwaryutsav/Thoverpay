@@ -87,6 +87,8 @@ router.get("/get-loyalty-codes", protect, authController.getUserLoyaltyCards);
 router.get("/get-wallet-codes", protect, authController.getWalletCodes);
 router.get("/get_userdata",protect,authController.getCurrentUserDetails);
 router.post("/login_user",authController.login);
+router.post("/create-order",optionalAuth,authController.createOrder);
+router.post("/verify-order",optionalAuth,authController.verifyOrder);
 
 
 export default router;

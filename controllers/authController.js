@@ -28,7 +28,9 @@ import moment from 'moment';
 import Wallet from '../models/Wallet.js';
 import Transaction from "../models/Transactions.js";
 import LoyaltyCard from "../models/Loyalty.js";
-
+import razorpay from "../config/razorpay.js";   // ✅ Razorpay instance
+import Payment from "../models/Payment.js";    // ✅ Payment model
+import Order from "../models/Order.js";
 
 // Route to send OTP using Twilio Verify API
 
@@ -1431,3 +1433,106 @@ export const login = catchAsync(async (req, res) => {
 });
 
 
+export const verifyOrder = async (req, res) => {
+  try {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ success: false, message: "All payment details are required" });
+    }
+
+    const generatedSignature = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+      .digest("hex");
+
+    if (generatedSignature !== razorpay_signature) {
+      return res.status(400).json({ success: false, message: "Payment verification failed" });
+    }
+
+    // update payment
+    const payment = await Payment.findOne({ orderId: razorpay_order_id });
+    if (!payment) return res.status(404).json({ success: false, message: "Payment not found" });
+
+    payment.paymentId = razorpay_payment_id;
+    payment.signature = razorpay_signature;
+    payment.status = "success";
+    await payment.save();
+
+    // update order
+    const order = await Order.findOne({ payment: payment._id });
+    if (order) {
+      order.status = "paid";
+      await order.save();
+    }
+
+    res.json({
+      success: true,
+      message: "Payment verified successfully",
+      paymentId: razorpay_payment_id,
+      orderId: razorpay_order_id,
+      guest: payment.userId ? false : true, // tells if it was guest
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+
+
+export const createOrder = async (req, res) => {
+  try {
+    const { products, guest } = req.body;
+
+    if (!products || products.length === 0) {
+      return res.status(400).json({ success: false, message: "Products are required" });
+    }
+
+    // calculate total amount
+    const totalAmount = products.reduce((acc, p) => acc + p.price * p.quantity, 0);
+
+    // create Razorpay order
+    const razorpayOrder = await razorpay.orders.create({
+      amount: totalAmount * 100, // paise
+      currency: "INR",
+      receipt: `receipt_${Date.now()}`,
+    });
+
+    // 🟢 If logged-in user available
+    const userId = req.user ? req.user._id : null;
+
+    // Save order in DB
+    const order = await Order.create({
+      userId,              // null if guest
+      products,
+      totalAmount,
+      status: "pending",
+    });
+
+    // Save payment info
+    const payment = await Payment.create({
+      userId,              // null if guest
+      orderId: razorpayOrder.id,
+      amount: totalAmount,
+      currency: "INR",
+      status: "created",
+      description: guest ? "Guest Checkout" : "User Checkout",
+    });
+
+    order.payment = payment._id;
+    await order.save();
+
+    res.json({
+      success: true,
+      key: process.env.RAZORPAY_KEY_ID, // needed on frontend
+      orderId: razorpayOrder.id,
+      amount: totalAmount,
+      currency: "INR",
+      guest: !userId, // tells frontend whether it was guest checkout
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
