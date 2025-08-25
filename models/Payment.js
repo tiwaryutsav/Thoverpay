@@ -1,26 +1,36 @@
 import mongoose from "mongoose";
 
-const paymentSchema = new mongoose.Schema(
-  {
-    userId: { 
-      type: mongoose.Schema.Types.ObjectId, 
-      ref: "User", 
-      // required: true 
-    }, // references the user
-    orderId: { type: String, required: true }, // Razorpay order ID
-    paymentId: { type: String },               // Razorpay payment ID
-    signature: { type: String },               // Razorpay signature
-    amount: { type: Number, required: true },  // in rupees
-    currency: { type: String, default: "INR" },
-    status: {
-      type: String,
-      enum: ["created", "success", "failed", "pending"],
-      default: "created",
-    },
-    method: { type: String }, // card, upi, netbanking etc.
-    description: { type: String },
+const paymentSchema = new mongoose.Schema({
+  orderId: {
+    type: String,
+    required: true,
+    unique: true
   },
-  { timestamps: true }
-);
+  amount: {
+    type: Number,
+    required: true
+  },
+  currency: {
+    type: String,
+    default: "INR"
+  },
+  status: {
+    type: String,
+    enum: ["PENDING", "SUCCESS", "FAILED", "CANCELLED"],
+    default: "PENDING"
+  },
+  paymentMode: {
+    type: String
+  },
+  referenceId: {
+    type: String // Cashfree transaction reference ID
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+});
 
-export default mongoose.model("Payment", paymentSchema);
+const Payment = mongoose.model("Payment", paymentSchema);
+
+export default Payment;

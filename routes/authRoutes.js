@@ -87,8 +87,9 @@ router.get("/get-loyalty-codes", protect, authController.getUserLoyaltyCards);
 router.get("/get-wallet-codes", protect, authController.getWalletCodes);
 router.get("/get_userdata",protect,authController.getCurrentUserDetails);
 router.post("/login_user",authController.login);
-router.post("/create-order",optionalAuth,authController.createOrder);
-router.post("/verify-order",optionalAuth,authController.verifyOrder);
-
+// router.post("/create-order",optionalAuth,authController.createOrder);
+// router.post("/verify-order",optionalAuth,authController.verifyOrder);
+router.post("/create-order",protect, authController.createOrder);
+router.post("/cashfree-webhook",authController.cashfreeWebhook);
 
 export default router;

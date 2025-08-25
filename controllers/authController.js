@@ -28,9 +28,10 @@ import moment from 'moment';
 import Wallet from '../models/Wallet.js';
 import Transaction from "../models/Transactions.js";
 import LoyaltyCard from "../models/Loyalty.js";
-import razorpay from "../config/razorpay.js";   // ✅ Razorpay instance
+// import razorpay from "../config/razorpay.js";   // ✅ Razorpay instance
+import cashfreeConfig from "../config/cashfree.js";
 import Payment from "../models/Payment.js";    // ✅ Payment model
-import Order from "../models/Order.js";
+// import Order from "../models/Order.js";
 
 // Route to send OTP using Twilio Verify API
 
@@ -588,11 +589,6 @@ export const createWallet = async (req, res) => {
 };
 
 
-
-
-
-
-
 export const submitKycDetails = catchAsync(async (req, res) => {
   const userId = req.user._id; // logged-in user id
   const { kyc_documents } = req.body; // array of objects
@@ -630,10 +626,6 @@ export const submitKycDetails = catchAsync(async (req, res) => {
     data: updatedUser.kyc_details,
   });
 });
-
-
-
-
 
 
 export const buyCoin = async (req, res) => {
@@ -1433,106 +1425,204 @@ export const login = catchAsync(async (req, res) => {
 });
 
 
-export const verifyOrder = async (req, res) => {
-  try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+// ;export const verifyOrder = async (req, res) => {
+//   try {
+//     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
 
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-      return res.status(400).json({ success: false, message: "All payment details are required" });
-    }
+//     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+//       return res.status(400).json({ success: false, message: "All payment details are required" });
+//     }
 
-    const generatedSignature = crypto
-      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-      .digest("hex");
+//     const generatedSignature = crypto
+//       .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+//       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+//       .digest("hex");
 
-    if (generatedSignature !== razorpay_signature) {
-      return res.status(400).json({ success: false, message: "Payment verification failed" });
-    }
+//     if (generatedSignature !== razorpay_signature) {
+//       return res.status(400).json({ success: false, message: "Payment verification failed" });
+//     }
 
-    // update payment
-    const payment = await Payment.findOne({ orderId: razorpay_order_id });
-    if (!payment) return res.status(404).json({ success: false, message: "Payment not found" });
+//     // update payment
+//     const payment = await Payment.findOne({ orderId: razorpay_order_id });
+//     if (!payment) return res.status(404).json({ success: false, message: "Payment not found" });
 
-    payment.paymentId = razorpay_payment_id;
-    payment.signature = razorpay_signature;
-    payment.status = "success";
-    await payment.save();
+//     payment.paymentId = razorpay_payment_id;
+//     payment.signature = razorpay_signature;
+//     payment.status = "success";
+//     await payment.save();
 
-    // update order
-    const order = await Order.findOne({ payment: payment._id });
-    if (order) {
-      order.status = "paid";
-      await order.save();
-    }
+//     // update order
+//     const order = await Order.findOne({ payment: payment._id });
+//     if (order) {
+//       order.status = "paid";
+//       await order.save();
+//     }
 
-    res.json({
-      success: true,
-      message: "Payment verified successfully",
-      paymentId: razorpay_payment_id,
-      orderId: razorpay_order_id,
-      guest: payment.userId ? false : true, // tells if it was guest
+//     res.json({
+//       success: true,
+//       message: "Payment verified successfully",
+//       paymentId: razorpay_payment_id,
+//       orderId: razorpay_order_id,
+//       guest: payment.userId ? false : true, // tells if it was guest
+//     });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ success: false, message: "Server error" });
+//   }
+// }
+
+
+
+// export const createOrder = async (req, res) => {
+//   try {
+//     const { products, guest } = req.body;
+
+//     if (!products || products.length === 0) {
+//       return res.status(400).json({ success: false, message: "Products are required" });
+//     }
+
+//     // calculate total amount
+//     const totalAmount = products.reduce((acc, p) => acc + p.price * p.quantity, 0);
+
+//     // create Razorpay order
+//     const razorpayOrder = await razorpay.orders.create({
+//       amount: totalAmount * 100, // paise
+//       currency: "INR",
+//       receipt: `receipt_${Date.now()}`,
+//     });
+
+//     // 🟢 If logged-in user available
+//     const userId = req.user ? req.user._id : null;
+
+//     // Save order in DB
+//     const order = await Order.create({
+//       userId,              // null if guest
+//       products,
+//       totalAmount,
+//       status: "pending",
+//     });
+
+//     // Save payment info
+//     const payment = await Payment.create({
+//       userId,              // null if guest
+//       orderId: razorpayOrder.id,
+//       amount: totalAmount,
+//       currency: "INR",
+//       status: "created",
+//       description: guest ? "Guest Checkout" : "User Checkout",
+//     });
+
+//     order.payment = payment._id;
+//     await order.save();
+
+//     res.json({
+//       success: true,
+//       key: process.env.RAZORPAY_KEY_ID, // needed on frontend
+//       orderId: razorpayOrder.id,
+//       amount: totalAmount,
+//       currency: "INR",
+//       guest: !userId, // tells frontend whether it was guest checkout
+//     });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ success: false, message: "Server error" });
+//   }
+// };
+
+// import axios from "axios";
+// import Payment from "../models/paymentModel.js"; // adjust path as per your project
+
+export const createOrder = catchAsync(async (req, res) => {
+  const { amount, currency } = req.body;
+
+  if (!amount) {
+    return res.status(400).json({
+      success: false,
+      message: "Amount is required",
     });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: "Server error" });
   }
-};
 
-
-
-export const createOrder = async (req, res) => {
   try {
-    const { products, guest } = req.body;
-
-    if (!products || products.length === 0) {
-      return res.status(400).json({ success: false, message: "Products are required" });
-    }
-
-    // calculate total amount
-    const totalAmount = products.reduce((acc, p) => acc + p.price * p.quantity, 0);
-
-    // create Razorpay order
-    const razorpayOrder = await razorpay.orders.create({
-      amount: totalAmount * 100, // paise
-      currency: "INR",
-      receipt: `receipt_${Date.now()}`,
-    });
-
-    // 🟢 If logged-in user available
-    const userId = req.user ? req.user._id : null;
+    // call Cashfree Order API (Production URL)
+    const response = await axios.post(
+      "https://api.cashfree.com/pg/orders",
+      {
+        order_id: "order_" + Date.now(),
+        order_amount: amount,
+        order_currency: currency || "INR",
+        customer_details: {
+          customer_id: "cust_" + Date.now(),
+          customer_email: "test@example.com", // replace with actual user email
+          customer_phone: "9999999999", // replace with actual user phone
+        },
+      },
+      {
+        headers: {
+          "x-client-id": process.env.CASHFREE_APP_ID,
+          "x-client-secret": process.env.CASHFREE_SECRET_KEY,
+          "x-api-version": "2022-09-01",
+          "Content-Type": "application/json",
+        },
+      }
+    );
 
     // Save order in DB
-    const order = await Order.create({
-      userId,              // null if guest
-      products,
-      totalAmount,
-      status: "pending",
-    });
-
-    // Save payment info
     const payment = await Payment.create({
-      userId,              // null if guest
-      orderId: razorpayOrder.id,
-      amount: totalAmount,
-      currency: "INR",
-      status: "created",
-      description: guest ? "Guest Checkout" : "User Checkout",
+      orderId: response.data.order_id,
+      amount: amount,
+      currency: currency || "INR",
+      status: "PENDING",
     });
-
-    order.payment = payment._id;
-    await order.save();
 
     res.json({
       success: true,
-      key: process.env.RAZORPAY_KEY_ID, // needed on frontend
-      orderId: razorpayOrder.id,
-      amount: totalAmount,
-      currency: "INR",
-      guest: !userId, // tells frontend whether it was guest checkout
+      message: "Order created successfully",
+      data: response.data,
+      db: payment,
     });
+  } catch (error) {
+    console.error("Cashfree order error:", error.response?.data || error.message);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create order",
+      error: error.response?.data || error.message,
+    });
+  }
+});
+
+
+export const cashfreeWebhook = async (req, res) => {
+  try {
+    const data = req.body;
+    const signature = req.headers["x-webhook-signature"]; // 🔑 Cashfree sends HMAC signature
+
+    // Verify webhook authenticity
+    const computedSignature = crypto
+      .createHmac("sha256", process.env.CASHFREE_WEBHOOK_SECRET)
+      .update(JSON.stringify(data))
+      .digest("base64");
+
+    if (signature !== computedSignature) {
+      console.log("❌ Invalid signature, rejecting webhook");
+      return res.status(401).json({ success: false, message: "Invalid signature" });
+    }
+
+    console.log("✅ Webhook received:", data);
+
+    // Example: Update DB order status
+    const { order_id, order_status } = data.data || {};
+
+    if (order_id && order_status) {
+      await Order.findOneAndUpdate(
+        { orderId: order_id },
+        { status: order_status, updatedAt: new Date() }
+      );
+    }
+
+    return res.status(200).json({ success: true });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: "Server error" });
+    console.error("Webhook error:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 };
+
