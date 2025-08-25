@@ -253,11 +253,6 @@ export const updateUsername = catchAsync(async (req, res) => {
 
 //Route to check favorite post
 
-
-
-
-
-
 //Route to get connected To
 export const sendOTP_email = catchAsync(async (req, res) => {
   const { email } = req.body;
@@ -460,8 +455,6 @@ export const searchByUsername = async (req, res) => {
     });
   }
 };
-
-
 
 
 
@@ -1533,7 +1526,7 @@ export const login = catchAsync(async (req, res) => {
 // import Payment from "../models/paymentModel.js"; // adjust path as per your project
 
 export const createOrder = catchAsync(async (req, res) => {
-  const { amount, currency } = req.body;
+  const { amount, currency, phone } = req.body; // get phone number
 
   if (!amount) {
     return res.status(400).json({
@@ -1542,8 +1535,25 @@ export const createOrder = catchAsync(async (req, res) => {
     });
   }
 
+  if (!phone || phone.trim() === "") {
+    return res.status(400).json({
+      success: false,
+      message: "Phone number is required",
+    });
+  }
+
+  const userId = req.user._id;
+
+  const user = await User.findById(userId);
+  if (!user) {
+    return res.status(404).json({ success: false, message: "User not found" });
+  }
+
+  if (!user.email || user.email.trim() === "") {
+    return res.status(400).json({ success: false, message: "User must have a valid email" });
+  }
+
   try {
-    // call Cashfree Order API (Production URL)
     const response = await axios.post(
       "https://api.cashfree.com/pg/orders",
       {
@@ -1551,9 +1561,13 @@ export const createOrder = catchAsync(async (req, res) => {
         order_amount: amount,
         order_currency: currency || "INR",
         customer_details: {
-          customer_id: "cust_" + Date.now(),
-          customer_email: "test@example.com", // replace with actual user email
-          customer_phone: "9999999999", // replace with actual user phone
+          customer_id: user._id.toString(),
+          customer_email: user.email,
+          customer_phone: phone, // include phone number
+        },
+        order_meta: {
+          return_url: "https://yourwebsite.com/payment/return",
+          notify_url: "https://api.thoverpay.com/api/auth/cashfree-webhook",
         },
       },
       {
@@ -1566,12 +1580,13 @@ export const createOrder = catchAsync(async (req, res) => {
       }
     );
 
-    // Save order in DB
     const payment = await Payment.create({
       orderId: response.data.order_id,
+      userId: user._id,
       amount: amount,
       currency: currency || "INR",
       status: "PENDING",
+      phone: phone, // save phone in DB if you want
     });
 
     res.json({
@@ -1589,6 +1604,7 @@ export const createOrder = catchAsync(async (req, res) => {
     });
   }
 });
+
 
 
 export const cashfreeWebhook = async (req, res) => {
@@ -1625,4 +1641,45 @@ export const cashfreeWebhook = async (req, res) => {
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };
+
+
+export const handleReturn = catchAsync(async (req, res) => {
+  const { order_id, reference_id, tx_status, order_amount, order_currency } = req.query;
+
+  if (!order_id) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid request: order_id is missing",
+    });
+  }
+
+  const payment = await Payment.findOne({ orderId: order_id });
+  if (!payment) {
+    return res.status(404).json({
+      success: false,
+      message: "Payment record not found",
+    });
+  }
+
+  // Update payment status based on Cashfree response
+  if (tx_status === "SUCCESS") {
+    payment.status = "SUCCESS";
+  } else {
+    payment.status = "FAILED";
+  }
+
+  await payment.save();
+
+  res.json({
+    success: true,
+    message: `Payment ${payment.status}`,
+    data: {
+      orderId: order_id,
+      referenceId: reference_id,
+      status: payment.status,
+      amount: order_amount,
+      currency: order_currency,
+    },
+  });
+});
 

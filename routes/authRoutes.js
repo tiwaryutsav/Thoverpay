@@ -91,5 +91,6 @@ router.post("/login_user",authController.login);
 // router.post("/verify-order",optionalAuth,authController.verifyOrder);
 router.post("/create-order",protect, authController.createOrder);
 router.post("/cashfree-webhook",authController.cashfreeWebhook);
+router.post("/payment/return" , authController.handleReturn);
 
 export default router;
