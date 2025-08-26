@@ -1528,74 +1528,78 @@ export const login = catchAsync(async (req, res) => {
 export const createOrder = catchAsync(async (req, res) => {
   const { amount, currency, phone } = req.body;
 
-  // Basic validation
-  if (!amount) {
-    return res.status(400).json({ success: false, message: "Amount is required" });
-  }
-  if (!phone || phone.trim() === "") {
-    return res.status(400).json({ success: false, message: "Phone number is required" });
+  // Get logged-in user's ID from req.user
+  const userId = req.user?.id;
+
+  if (!userId) {
+    return res.status(401).json({
+      success: false,
+      message: "User not logged in",
+    });
   }
 
-  const userId = req.user._id;
-  const user = await User.findById(userId);
-  if (!user) {
-    return res.status(404).json({ success: false, message: "User not found" });
+  if (!amount) {
+    return res.status(400).json({
+      success: false,
+      message: "Amount is required",
+    });
   }
-  if (!user.email || user.email.trim() === "") {
-    return res.status(400).json({ success: false, message: "User must have a valid email" });
+
+  if (!phone || phone.trim() === "") {
+    return res.status(400).json({
+      success: false,
+      message: "Phone number is required",
+    });
   }
 
   try {
-    // Generate a unique order ID
-    const orderId = "order_" + Date.now();
+    // Check if user exists
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
 
-    // Create order in Cashfree
-    const response = await axios.post(
-      "https://api.cashfree.com/pg/orders",
+    // Create order on Cashfree (LIVE)
+    const cashfreeResponse = await axios.post(
+      "https://api.cashfree.com/api/v2/cftoken/order", // LIVE URL
       {
-        order_id: orderId,
-        order_amount: amount,
-        order_currency: currency || "INR",
-        customer_details: {
-          customer_id: user._id.toString(),
-          customer_email: user.email,
-          customer_phone: phone,
-        },
-        order_meta: {
-          return_url: "https://api.thoverpay.com/api/auth/payment/return",
-          notify_url: "https://api.thoverpay.com/api/auth/cashfree-webhook",
-        },
+        orderAmount: amount,
+        orderCurrency: currency,
+        customerPhone: phone, // use phone from client
       },
       {
         headers: {
-          "x-client-id": process.env.CASHFREE_APP_ID,
-          "x-client-secret": process.env.CASHFREE_SECRET_KEY,
-          "x-api-version": "2022-09-01",
           "Content-Type": "application/json",
+          "x-client-id": process.env.CASHFREE_CLIENT_ID,
+          "x-client-secret": process.env.CASHFREE_CLIENT_SECRET,
         },
       }
     );
 
-    // Store order in your DB
-    const payment = await Payment.create({
-      orderId: orderId, // same as Cashfree
-      userId: user._id,
-      amount: Number(amount),
-      currency: currency || "INR",
+    // Extract Cashfree orderId
+    const cashfreeOrderId = cashfreeResponse.data.orderId;
+
+    // Save order in MongoDB linked to user
+    const order = await Order.create({
+      orderId: cashfreeOrderId,
+      user: userId,   // reference to logged-in user
+      amount,
+      currency,
+      phone,          // client-provided phone
       status: "PENDING",
-      phone: phone,
-      customerEmail: user.email,
     });
 
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
       message: "Order created successfully",
-      data: response.data,
-      db: payment,
+      order,
     });
   } catch (error) {
-    console.error("Cashfree order error:", error.response?.data || error.message);
-    return res.status(500).json({
+    console.error("Error creating Cashfree order:", error.response?.data || error.message);
+    res.status(500).json({
       success: false,
       message: "Failed to create order",
       error: error.response?.data || error.message,
