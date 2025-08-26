@@ -1526,47 +1526,43 @@ export const login = catchAsync(async (req, res) => {
 // import Payment from "../models/paymentModel.js"; // adjust path as per your project
 
 export const createOrder = catchAsync(async (req, res) => {
-  const { amount, currency, phone } = req.body; // get phone number
+  const { amount, currency, phone } = req.body;
 
+  // Basic validation
   if (!amount) {
-    return res.status(400).json({
-      success: false,
-      message: "Amount is required",
-    });
+    return res.status(400).json({ success: false, message: "Amount is required" });
   }
-
   if (!phone || phone.trim() === "") {
-    return res.status(400).json({
-      success: false,
-      message: "Phone number is required",
-    });
+    return res.status(400).json({ success: false, message: "Phone number is required" });
   }
 
   const userId = req.user._id;
-
   const user = await User.findById(userId);
   if (!user) {
     return res.status(404).json({ success: false, message: "User not found" });
   }
-
   if (!user.email || user.email.trim() === "") {
     return res.status(400).json({ success: false, message: "User must have a valid email" });
   }
 
   try {
+    // Generate a unique order ID
+    const orderId = "order_" + Date.now();
+
+    // Create order in Cashfree
     const response = await axios.post(
       "https://api.cashfree.com/pg/orders",
       {
-        order_id: "order_" + Date.now(),
+        order_id: orderId,
         order_amount: amount,
         order_currency: currency || "INR",
         customer_details: {
           customer_id: user._id.toString(),
           customer_email: user.email,
-          customer_phone: phone, // include phone number
+          customer_phone: phone,
         },
         order_meta: {
-          return_url: "https://yourwebsite.com/payment/return",
+          return_url: "https://api.thoverpay.com/api/auth/payment/return",
           notify_url: "https://api.thoverpay.com/api/auth/cashfree-webhook",
         },
       },
@@ -1580,16 +1576,18 @@ export const createOrder = catchAsync(async (req, res) => {
       }
     );
 
+    // Store order in your DB
     const payment = await Payment.create({
-      orderId: response.data.order_id,
+      orderId: orderId, // same as Cashfree
       userId: user._id,
-      amount: amount,
+      amount: Number(amount),
       currency: currency || "INR",
       status: "PENDING",
-      phone: phone, // save phone in DB if you want
+      phone: phone,
+      customerEmail: user.email,
     });
 
-    res.json({
+    return res.status(200).json({
       success: true,
       message: "Order created successfully",
       data: response.data,
@@ -1597,7 +1595,7 @@ export const createOrder = catchAsync(async (req, res) => {
     });
   } catch (error) {
     console.error("Cashfree order error:", error.response?.data || error.message);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to create order",
       error: error.response?.data || error.message,
@@ -1607,33 +1605,52 @@ export const createOrder = catchAsync(async (req, res) => {
 
 
 
+
+
 export const cashfreeWebhook = async (req, res) => {
   try {
     const data = req.body;
-    const signature = req.headers["x-webhook-signature"]; // 🔑 Cashfree sends HMAC signature
+    const signature = req.headers["x-webhook-signature"]; // Cashfree HMAC
 
-    // Verify webhook authenticity
+    // Compute signature
     const computedSignature = crypto
       .createHmac("sha256", process.env.CASHFREE_WEBHOOK_SECRET)
       .update(JSON.stringify(data))
-      .digest("base64");
+      .digest("base64"); // Make sure format matches Cashfree
 
     if (signature !== computedSignature) {
-      console.log("❌ Invalid signature, rejecting webhook");
+      console.log("❌ Invalid signature");
       return res.status(401).json({ success: false, message: "Invalid signature" });
     }
 
     console.log("✅ Webhook received:", data);
 
-    // Example: Update DB order status
-    const { order_id, order_status } = data.data || {};
+    // Extract payment info
+    const { orderId, referenceId, orderAmount, orderStatus, paymentMode } = data;
 
-    if (order_id && order_status) {
-      await Order.findOneAndUpdate(
-        { orderId: order_id },
-        { status: order_status, updatedAt: new Date() }
-      );
+    if (!orderId) {
+      return res.status(400).json({ success: false, message: "Missing orderId" });
     }
+
+    // Update DB
+    const updated = await Payment.findOneAndUpdate(
+      { orderId: orderId },
+      {
+        status: orderStatus,
+        referenceId: referenceId,
+        paymentMode: paymentMode,
+        amount: orderAmount,
+        updatedAt: new Date(),
+      },
+      { new: true } // return updated document
+    );
+
+    if (!updated) {
+      console.log(`❌ Order not found: ${orderId}`);
+      return res.status(404).json({ success: false, message: "Order not found" });
+    }
+
+    console.log("✅ Payment updated:", updated);
 
     return res.status(200).json({ success: true });
   } catch (err) {
