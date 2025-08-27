@@ -1523,85 +1523,9 @@ export const login = catchAsync(async (req, res) => {
 // };
 
 // import axios from "axios";
-// import Payment from "../models/paymentModel.js"; // adjust path as per your project
+// import Payment from "../models/paymentModel.js"; // adjust path as per your projec
 
-export const createOrder = catchAsync(async (req, res) => {
-  const { amount, currency, phone } = req.body;
 
-  // Basic validation
-  if (!amount) {
-    return res.status(400).json({ success: false, message: "Amount is required" });
-  }
-  if (!phone || phone.trim() === "") {
-    return res.status(400).json({ success: false, message: "Phone number is required" });
-  }
-
-  const userId = req.user._id;
-  const user = await User.findById(userId);
-  if (!user) {
-    return res.status(404).json({ success: false, message: "User not found" });
-  }
-  if (!user.email || user.email.trim() === "") {
-    return res.status(400).json({ success: false, message: "User must have a valid email" });
-  }
-
-  try {
-    // Generate a unique order ID
-    const orderId = "order_" + Date.now();
-
-    // Create order in Cashfree
-    const response = await axios.post(
-      "https://api.cashfree.com/pg/orders",
-      {
-        order_id: orderId,
-        order_amount: amount,
-        order_currency: currency || "INR",
-        customer_details: {
-          customer_id: user._id.toString(),
-          customer_email: user.email,
-          customer_phone: phone,
-        },
-        order_meta: {
-          return_url: "https://api.thoverpay.com/api/auth/payment/return",
-          notify_url: "https://api.thoverpay.com/api/auth/cashfree-webhook",
-        },
-      },
-      {
-        headers: {
-          "x-client-id": process.env.CASHFREE_APP_ID,
-          "x-client-secret": process.env.CASHFREE_SECRET_KEY,
-          "x-api-version": "2022-09-01",
-          "Content-Type": "application/json",
-        },
-      }
-    );
-
-    // Store order in your DB
-    const payment = await Payment.create({
-      orderId: orderId, // same as Cashfree
-      userId: user._id,
-      amount: Number(amount),
-      currency: currency || "INR",
-      status: "PENDING",
-      phone: phone,
-      customerEmail: user.email,
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: "Order created successfully",
-      data: response.data,
-      db: payment,
-    });
-  } catch (error) {
-    console.error("Cashfree order error:", error.response?.data || error.message);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to create order",
-      error: error.response?.data || error.message,
-    });
-  }
-});
 
 
 
@@ -1699,4 +1623,125 @@ export const handleReturn = catchAsync(async (req, res) => {
     },
   });
 });
+
+// ✅ Step 1: Create Cashfree Order
+export const createOrder = catchAsync(async (req, res) => {
+  const { amount, currency, phone } = req.body;
+  const userId = req.user?.id;
+
+  if (!userId) {
+    return res.status(401).json({ success: false, message: "User not logged in" });
+  }
+
+  if (!amount) {
+    return res.status(400).json({ success: false, message: "Amount is required" });
+  }
+
+  if (!phone || phone.trim() === "") {
+    return res.status(400).json({ success: false, message: "Phone number is required" });
+  }
+
+  try {
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const cashfreeUrl = `${process.env.CASHFREE_API_URL}/orders`;
+
+    // ✅ Payload without custom order_id (Cashfree will generate it)
+    const orderPayload = {
+      order_amount: amount,
+      order_currency: currency || "INR",
+      customer_details: {
+        customer_id: userId.toString(),
+        customer_email: user.email || "test@example.com",
+        customer_phone: phone,
+        customer_name: user.name || "Customer",
+      },
+      order_meta: {
+        return_url: "myapp://payment-success", // mobile deep link
+      },
+    };
+
+    const cashfreeResponse = await axios.post(cashfreeUrl, orderPayload, {
+      headers: {
+        "Content-Type": "application/json",
+        "x-client-id": process.env.CASHFREE_APP_ID,
+        "x-client-secret": process.env.CASHFREE_SECRET_KEY,
+        "x-api-version": "2022-09-01",
+      },
+    });
+
+    const data = cashfreeResponse.data;
+
+    // ✅ Save PENDING order in DB
+    await Payment.create({
+      orderId: data.order_id,  // From Cashfree
+      amount,
+      currency: currency || "INR",
+      status: "PENDING",
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Order created successfully",
+      data: {
+        order_id: data.order_id,
+        payment_session_id: data.payment_session_id,
+      },
+    });
+  } catch (error) {
+    console.error("Error creating Cashfree order:", error.response?.data || error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create order",
+      error: error.response?.data || error.message,
+    });
+  }
+});
+
+// ✅ Step 2: Verify Payment (Webhook or frontend callback)
+export const verifyPayment = catchAsync(async (req, res) => {
+  try {
+    const { orderId } = req.body; // frontend sends order_id after success
+
+    const cashfreeUrl = `${process.env.CASHFREE_API_URL}/orders/${orderId}/payments`;
+
+    const response = await axios.get(cashfreeUrl, {
+      headers: {
+        "x-client-id": process.env.CASHFREE_APP_ID,
+        "x-client-secret": process.env.CASHFREE_SECRET_KEY,
+        "x-api-version": "2022-09-01",
+      },
+    });
+
+    const paymentData = response.data[0]; // latest payment attempt
+
+    // ✅ Update DB with actual payment status
+    await Payment.findOneAndUpdate(
+      { orderId },
+      {
+        status: paymentData.payment_status,
+        referenceId: paymentData.cf_payment_id, // Cashfree Payment ID
+        paymentMode: paymentData.payment_group,
+      },
+      { new: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Payment verified successfully",
+      data: paymentData,
+    });
+  } catch (error) {
+    console.error("Error verifying payment:", error.response?.data || error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to verify payment",
+      error: error.response?.data || error.message,
+    });
+  }
+});
+
 
