@@ -514,64 +514,72 @@ export const createWallet = async (req, res) => {
       });
     }
 
-    const isLoggedIn = !!req.user; // true if token valid & user found
+    const isLoggedIn = !!req.user;
 
-    // ✅ If logged in, check if wallet already exists
+    // ✅ If logged-in → only 1 wallet allowed
     if (isLoggedIn) {
       let existingWallet = await Wallet.findOne({ userId: req.user._id });
 
       if (existingWallet) {
-        // 👉 Append 5 new codes instead of rejecting
-        for (let i = 0; i < 5; i++) {
-          const nextIndex = existingWallet.redeemCode.size.toString();
-          existingWallet.redeemCode.set(nextIndex, generateRandomCode());
-        }
-
-        await existingWallet.save();
-
         return res.status(200).json({
           success: true,
-          message: "5 new codes added to existing wallet",
+          message: "Wallet already exists",
           data: existingWallet
         });
       }
-    } else {
-      // ✅ If guest, check if they already have a wallet
-      let guestWallet = await Wallet.findOne({ isGuest: true, walletName });
-      if (guestWallet) {
-        return res.status(400).json({
-          success: false,
-          message: "Guest wallet already exists",
-          data: guestWallet
-        });
-      }
-    }
 
-    // ✅ If no wallet exists → create one
-    const wallet = new Wallet({
-      walletName,
-      userId: isLoggedIn ? req.user._id : null,
-      isGuest: !isLoggedIn,
-      walletType: "personal",
-      professionalWallet: false,
-      redeemCode: {}
-    });
+      // create wallet for logged-in user
+      const wallet = new Wallet({
+        walletName,
+        userId: req.user._id,
+        isGuest: false,
+        walletType: "personal",
+        professionalWallet: false,
+        totalCoin: 49,
+        redeemCode: {}
+      });
 
-    if (isLoggedIn) {
-      // Logged-in user gets 5 codes
       for (let i = 0; i < 5; i++) {
         wallet.redeemCode.set(i.toString(), generateRandomCode());
       }
-    } else {
-      // Guest gets only 1 code
-      wallet.redeemCode.set("0", generateRandomCode());
+
+      await wallet.save();
+
+      return res.status(201).json({
+        success: true,
+        message: "Wallet created with 5 codes and 49 coins",
+        data: wallet
+      });
     }
+
+    // ✅ If guest → multiple wallets allowed (unique walletName)
+    let guestWallet = await Wallet.findOne({ isGuest: true, walletName });
+    if (guestWallet) {
+      return res.status(400).json({
+        success: false,
+        message: "Guest wallet with this name already exists",
+        data: guestWallet
+      });
+    }
+
+    // create new guest wallet
+    const wallet = new Wallet({
+      walletName,
+      userId: null,
+      isGuest: true,
+      walletType: "personal",
+      professionalWallet: false,
+      totalCoin: 49,
+      redeemCode: {}
+    });
+
+    wallet.redeemCode.set("0", generateRandomCode());
 
     await wallet.save();
 
     return res.status(201).json({
       success: true,
-      message: isLoggedIn ? "Wallet created with 5 codes" : "Guest wallet created with 1 code",
+      message: "Guest wallet created with 1 code and 49 coins",
       data: wallet
     });
 
@@ -580,6 +588,7 @@ export const createWallet = async (req, res) => {
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
+
 
 
 export const submitKycDetails = catchAsync(async (req, res) => {
@@ -760,7 +769,12 @@ export const transferCoins = async (req, res) => {
       return res.status(400).json({ success: false, message: "Insufficient coins to transfer" });
     }
 
-    // Recipient's wallet using wallet ID
+    // Prevent transferring to own wallet
+    if (fromWallet._id.toString() === toWalletId) {
+      return res.status(400).json({ success: false, message: "Cannot transfer coins to your own wallet" });
+    }
+
+    // Recipient's wallet
     const toWallet = await Wallet.findById(toWalletId);
     if (!toWallet) {
       return res.status(404).json({ success: false, message: "Recipient wallet not found" });
@@ -770,14 +784,21 @@ export const transferCoins = async (req, res) => {
     fromWallet.totalCoin -= coins;
     toWallet.totalCoin += coins;
 
+    // Handle redeem codes
+    if (fromWallet.redeemCode) {
+      for (const [key, value] of fromWallet.redeemCode.entries()) {
+        if (value === redeemCode) {
+          fromWallet.redeemCode.delete(key);
+          break;
+        }
+      }
+    }
+
+    const usedIndex = Object.keys(fromWallet.usedCode || {}).length.toString();
+    fromWallet.usedCode.set(usedIndex, redeemCode);
+
     await fromWallet.save();
     await toWallet.save();
-
-    // Save redeem code in sender wallet
-    const redeemIndex = Object.keys(fromWallet.redeemCode || {}).length.toString();
-    fromWallet.redeemCode.set(redeemIndex, redeemCode);
-    fromWallet.usedCode.set(redeemIndex, redeemCode);
-    await fromWallet.save();
 
     // Record transaction
     const transaction = await Transaction.create({
@@ -804,6 +825,8 @@ export const transferCoins = async (req, res) => {
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
+
+
 
 
 function generateCode(length = 8) {
@@ -1418,116 +1441,6 @@ export const login = catchAsync(async (req, res) => {
 });
 
 
-// ;export const verifyOrder = async (req, res) => {
-//   try {
-//     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
-
-//     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-//       return res.status(400).json({ success: false, message: "All payment details are required" });
-//     }
-
-//     const generatedSignature = crypto
-//       .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-//       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-//       .digest("hex");
-
-//     if (generatedSignature !== razorpay_signature) {
-//       return res.status(400).json({ success: false, message: "Payment verification failed" });
-//     }
-
-//     // update payment
-//     const payment = await Payment.findOne({ orderId: razorpay_order_id });
-//     if (!payment) return res.status(404).json({ success: false, message: "Payment not found" });
-
-//     payment.paymentId = razorpay_payment_id;
-//     payment.signature = razorpay_signature;
-//     payment.status = "success";
-//     await payment.save();
-
-//     // update order
-//     const order = await Order.findOne({ payment: payment._id });
-//     if (order) {
-//       order.status = "paid";
-//       await order.save();
-//     }
-
-//     res.json({
-//       success: true,
-//       message: "Payment verified successfully",
-//       paymentId: razorpay_payment_id,
-//       orderId: razorpay_order_id,
-//       guest: payment.userId ? false : true, // tells if it was guest
-//     });
-//   } catch (err) {
-//     console.error(err);
-//     res.status(500).json({ success: false, message: "Server error" });
-//   }
-// }
-
-
-
-// export const createOrder = async (req, res) => {
-//   try {
-//     const { products, guest } = req.body;
-
-//     if (!products || products.length === 0) {
-//       return res.status(400).json({ success: false, message: "Products are required" });
-//     }
-
-//     // calculate total amount
-//     const totalAmount = products.reduce((acc, p) => acc + p.price * p.quantity, 0);
-
-//     // create Razorpay order
-//     const razorpayOrder = await razorpay.orders.create({
-//       amount: totalAmount * 100, // paise
-//       currency: "INR",
-//       receipt: `receipt_${Date.now()}`,
-//     });
-
-//     // 🟢 If logged-in user available
-//     const userId = req.user ? req.user._id : null;
-
-//     // Save order in DB
-//     const order = await Order.create({
-//       userId,              // null if guest
-//       products,
-//       totalAmount,
-//       status: "pending",
-//     });
-
-//     // Save payment info
-//     const payment = await Payment.create({
-//       userId,              // null if guest
-//       orderId: razorpayOrder.id,
-//       amount: totalAmount,
-//       currency: "INR",
-//       status: "created",
-//       description: guest ? "Guest Checkout" : "User Checkout",
-//     });
-
-//     order.payment = payment._id;
-//     await order.save();
-
-//     res.json({
-//       success: true,
-//       key: process.env.RAZORPAY_KEY_ID, // needed on frontend
-//       orderId: razorpayOrder.id,
-//       amount: totalAmount,
-//       currency: "INR",
-//       guest: !userId, // tells frontend whether it was guest checkout
-//     });
-//   } catch (err) {
-//     console.error(err);
-//     res.status(500).json({ success: false, message: "Server error" });
-//   }
-// };
-
-// import axios from "axios";
-// import Payment from "../models/paymentModel.js"; // adjust path as per your projec
-
-
-
-
 
 
 
@@ -1584,45 +1497,7 @@ export const cashfreeWebhook = async (req, res) => {
 };
 
 
-export const handleReturn = catchAsync(async (req, res) => {
-  const { order_id, reference_id, tx_status, order_amount, order_currency } = req.query;
 
-  if (!order_id) {
-    return res.status(400).json({
-      success: false,
-      message: "Invalid request: order_id is missing",
-    });
-  }
-
-  const payment = await Payment.findOne({ orderId: order_id });
-  if (!payment) {
-    return res.status(404).json({
-      success: false,
-      message: "Payment record not found",
-    });
-  }
-
-  // Update payment status based on Cashfree response
-  if (tx_status === "SUCCESS") {
-    payment.status = "SUCCESS";
-  } else {
-    payment.status = "FAILED";
-  }
-
-  await payment.save();
-
-  res.json({
-    success: true,
-    message: `Payment ${payment.status}`,
-    data: {
-      orderId: order_id,
-      referenceId: reference_id,
-      status: payment.status,
-      amount: order_amount,
-      currency: order_currency,
-    },
-  });
-});
 
 // ✅ Step 1: Create Cashfree Order
 export const createOrder = catchAsync(async (req, res) => {
