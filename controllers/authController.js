@@ -842,7 +842,7 @@ export const createLoyaltyCard = async (req, res) => {
     if (!req.user || !req.user._id) {
       return res.status(401).json({
         success: false,
-        message: "Unauthorized: Please login to create loyalty card"
+        message: "Unauthorized: Please login to create loyalty code"
       });
     }
 
@@ -892,7 +892,7 @@ export const createLoyaltyCard = async (req, res) => {
     // Generate a single loyalty code (string)
     const loyaltyCode = generateCode(8); // e.g. "AB12CD34"
 
-    // Create loyalty card
+    // Create loyalty code entry
     const loyaltyCard = await LoyaltyCard.create({
       walletId: wallet._id,
       userId: req.user._id,
@@ -903,24 +903,24 @@ export const createLoyaltyCard = async (req, res) => {
       expiryDate
     });
 
-    // Create transaction
+    // Create transaction (notice the changes here 👇)
     const transaction = await Transaction.create({
-      transactionType: "buyLoyaltyCard",
+      transactionType: "buyLoyaltyCode", // ✅ updated enum value
       fromWallet: wallet._id,
       userId: req.user._id,
-      toLoyaltyCard: loyaltyCard._id,
+      toLoyaltyCode: loyaltyCode,        // ✅ store the code, not card ref
       coin: codeValue,
       createdAt: new Date()
     });
 
     res.status(201).json({
       success: true,
-      message: "Loyalty card created successfully and coins deducted",
+      message: "Loyalty code created successfully and coins deducted",
       loyaltyCard,
       transaction
     });
   } catch (error) {
-    console.error("Create loyalty card error:", error);
+    console.error("Create loyalty code error:", error);
     res.status(500).json({
       success: false,
       message: "Server error"
@@ -928,13 +928,14 @@ export const createLoyaltyCard = async (req, res) => {
   }
 };
 
-export const redeemLoyaltyCard = async (req, res) => {
+
+export const redeemLoyaltyCode = async (req, res) => {
   try {
     // 1. Auth check
     if (!req.user || !req.user._id) {
       return res.status(401).json({
         success: false,
-        message: "Unauthorized: Please login to redeem loyalty card"
+        message: "Unauthorized: Please login to redeem loyalty code"
       });
     }
 
@@ -947,7 +948,7 @@ export const redeemLoyaltyCard = async (req, res) => {
       });
     }
 
-    // 2. Find loyalty card by code
+    // 2. Find loyalty code entry
     const loyaltyCard = await LoyaltyCard.findOne({ loyaltyCode });
     if (!loyaltyCard) {
       return res.status(404).json({
@@ -961,14 +962,14 @@ export const redeemLoyaltyCard = async (req, res) => {
       if (loyaltyCard.userId.toString() !== req.user._id.toString()) {
         return res.status(403).json({
           success: false,
-          message: "This loyalty card is private and can only be redeemed by its creator"
+          message: "This loyalty code is private and can only be redeemed by its creator"
         });
       }
     } else {
       if (loyaltyCard.userId.toString() === req.user._id.toString()) {
         return res.status(403).json({
           success: false,
-          message: "This public loyalty card cannot be redeemed by its creator"
+          message: "This public loyalty code cannot be redeemed by its creator"
         });
       }
     }
@@ -1005,15 +1006,15 @@ export const redeemLoyaltyCard = async (req, res) => {
     wallet.totalCoin += loyaltyCard.codeValue;
     await wallet.save();
 
-    // 8. Mark loyalty card as used
+    // 8. Mark loyalty code as used
     loyaltyCard.isCodeUsed = true;
     await loyaltyCard.save();
 
-    // 9. Create redeem transaction (fromLoyaltyCard → toWallet)
+    // 9. Create redeem transaction (fromLoyaltyCode → toWallet)
     const transaction = await Transaction.create({
-      transactionType: "redeemLoyaltyCard",
-      fromLoyaltyCard: loyaltyCard._id, // coins came from this loyalty card
-      toWallet: wallet._id,             // coins go to this wallet
+      transactionType: "redeemLoyaltyCode", // ✅ updated enum
+      fromLoyaltyCode: loyaltyCode,         // ✅ store string instead of ObjectId
+      toWallet: wallet._id,                 
       userId: req.user._id,
       coin: loyaltyCard.codeValue,
       createdAt: new Date()
@@ -1022,19 +1023,20 @@ export const redeemLoyaltyCard = async (req, res) => {
     // 10. Return success
     res.status(200).json({
       success: true,
-      message: "Loyalty card redeemed successfully, coins credited back",
+      message: "Loyalty code redeemed successfully, coins credited back",
       wallet,
       transaction
     });
 
   } catch (error) {
-    console.error("Redeem loyalty card error:", error);
+    console.error("Redeem loyalty code error:", error);
     res.status(500).json({
       success: false,
       message: "Server error"
     });
   }
 };
+
 
 export const generateWalletApiKey = catchAsync(async (req, res) => {
   if (!req.user || !req.user._id) {

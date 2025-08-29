@@ -2,11 +2,15 @@ import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 
-const kycDocumentSchema = new mongoose.Schema({
-  businessName: { type: String, required: true, trim: true },
-  panNumber: { type: String, required: true, trim: true },
-  panImageUrl: { type: String, required: true, trim: true },
-}, { _id: false });
+// Single KYC Document schema
+const kycDocumentSchema = new mongoose.Schema(
+  {
+    businessName: { type: String, required: true, trim: true },
+    panNumber: { type: String, required: true, trim: true },
+    panImageUrl: { type: String, required: true, trim: true },
+  },
+  { _id: false }
+);
 
 const userSchema = new mongoose.Schema(
   {
@@ -32,10 +36,17 @@ const userSchema = new mongoose.Schema(
     phoneNumber: { type: String, default: '' },
     isKycVerified: { type: Boolean, default: false },
 
-    // New KYC details embedded object
+    // ✅ New KYC details object (not array)
     kyc_details: {
-      kycStatus: { type: String, default: 'Not verified' },  // KYC status field
-      kyc_documents: { type: [kycDocumentSchema], default: [] },  // Array of KYC documents
+      kycStatus: {
+        type: String,
+        enum: ['Not verified', 'Pending', 'Verified', 'Rejected'],
+        default: 'Pending',
+      },
+      kycDocument: {
+        type: kycDocumentSchema,
+        default: null,
+      },
     },
   },
   {
