@@ -28,8 +28,6 @@ import moment from 'moment';
 import Wallet from '../models/Wallet.js';
 import Transaction from "../models/Transactions.js";
 import LoyaltyCard from "../models/Loyalty.js";
-// import razorpay from "../config/razorpay.js";   // ✅ Razorpay instance
-import cashfreeConfig from "../config/cashfree.js";
 import Payment from "../models/Payment.js";    // ✅ Payment model
 // import Order from "../models/Order.js";
 
@@ -392,21 +390,30 @@ export const updatePasswordWithEmailOtp = catchAsync(async (req, res) => {
 
 
 //Login with email
-export const loginWithEmail = catchAsync(async (req, res) => {
-  const { email, password } = req.body;
+export const login = catchAsync(async (req, res) => {
+  const { email, username, password } = req.body;
 
-  if (!email || !password) {
+  if ((!email && !username) || !password) {
     return res.status(400).json({
       success: false,
-      message: 'Email and password are required'
+      message: 'Email/Username and password are required'
     });
   }
 
-  const user = await User.findOne({ email }).select('+password');
+  // Build query dynamically
+  let query = {};
+  if (email) {
+    query.email = email;
+  } else if (username) {
+    query.username = username;
+  }
+
+  const user = await User.findOne(query).select('+password');
+
   if (!user) {
     return res.status(401).json({
       success: false,
-      message: 'No user found with that email'
+      message: 'No user found with that email/username'
     });
   }
 
@@ -427,6 +434,7 @@ export const loginWithEmail = catchAsync(async (req, res) => {
     userId: user._id
   });
 });
+
 
 export const searchByUsername = async (req, res) => {
   try {
@@ -603,13 +611,19 @@ export const submitKycDetails = catchAsync(async (req, res) => {
     });
   }
 
+  // Use only the first document since schema expects a single object
+  const kycDocument = kyc_documents[0];
+
+  // Normalize kycStatus to capitalized form
+  const normalizedStatus = 'Pending'; // always capitalized
+
   // Update user's KYC details
   const updatedUser = await User.findByIdAndUpdate(
     userId,
     {
       $set: {
-        'kyc_details.kycStatus': 'pending',
-        'kyc_details.kyc_documents': kyc_documents, // store as array
+        'kyc_details.kycStatus': normalizedStatus,
+        'kyc_details.kycDocument': kycDocument,
       },
     },
     { new: true, runValidators: true }
@@ -624,7 +638,7 @@ export const submitKycDetails = catchAsync(async (req, res) => {
 
   res.status(200).json({
     success: true,
-    message: 'KYC details submitted successfully. Status is now pending.',
+    message: `KYC details submitted successfully. Status is now ${normalizedStatus}.`,
     data: updatedUser.kyc_details,
   });
 });
@@ -1406,41 +1420,7 @@ export const getCurrentUserDetails = catchAsync(async (req, res) => {
 });
 
 //ROUTES FOR ORIGNAL LOGIN
-export const login = catchAsync(async (req, res) => {
-  const { username, password } = req.body;
 
-  if (!username || !password) {
-    return res.status(400).json({
-      success: false,
-      message: 'Username and password are required'
-    });
-  }
-
-  const user = await User.findOne({ username }).select('+password');
-  if (!user) {
-    return res.status(401).json({
-      success: false,
-      message: 'No user found'
-    });
-  }
-
-  const isMatch = await user.comparePassword(password);
-  if (!isMatch) {
-    return res.status(401).json({
-      success: false,
-      message: 'Invalid credentials'
-    });
-  }
-
-  const token = await user.generateAuthToken();
-
-  res.json({
-    success: true,
-    message: 'Login successful',
-    token,
-    userId: user._id
-  });
-});
 
 
 
