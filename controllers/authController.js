@@ -1204,7 +1204,7 @@ export const getWalletTransactions = async (req, res) => {
     if (!req.user || !req.user._id) {
       return res.status(401).json({
         success: false,
-        message: "Unauthorized: Please login to view transactions"
+        message: "Unauthorized: Please login to view transactions",
       });
     }
 
@@ -1212,33 +1212,32 @@ export const getWalletTransactions = async (req, res) => {
     if (!wallet) {
       return res.status(404).json({
         success: false,
-        message: "Wallet not found for this user"
+        message: "Wallet not found for this user",
       });
     }
 
-    // Fetch all transaction details for that wallet
+    // ✅ Fetch all transactions where this user's wallet is involved
     const transactions = await Transaction.find({
-      $or: [
-        { toWallet: wallet._id },
-        { fromWallet: wallet._id }
-      ]
+      $or: [{ fromWallet: wallet._id }, { toWallet: wallet._id }],
     })
-      .sort({ createdAt: -1 });  // latest first
+      .populate("fromWallet", "userId")  // show which user sent
+      .populate("toWallet", "userId")    // show which user received
+      .sort({ createdAt: -1 });
 
     res.json({
       success: true,
       count: transactions.length,
-      transactions
+      transactions,
     });
-
   } catch (error) {
     console.error("Get wallet transactions error:", error);
     res.status(500).json({
       success: false,
-      message: "Server error"
+      message: "Server error",
     });
   }
 };
+
 
 
 
