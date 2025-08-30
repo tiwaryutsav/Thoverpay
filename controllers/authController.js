@@ -599,49 +599,6 @@ export const createWallet = async (req, res) => {
 
 
 
-export const submitKycDetails = catchAsync(async (req, res) => {
-  const userId = req.user._id; // logged-in user id
-  const { kyc_documents } = req.body; // array of objects
-
-  // Validate that kyc_documents is a non-empty array
-  if (!Array.isArray(kyc_documents) || kyc_documents.length === 0) {
-    return res.status(400).json({
-      success: false,
-      message: 'KYC documents are required and must be a non-empty array',
-    });
-  }
-
-  // Use only the first document since schema expects a single object
-  const kycDocument = kyc_documents[0];
-
-  // Normalize kycStatus to capitalized form
-  const normalizedStatus = 'Pending'; // always capitalized
-
-  // Update user's KYC details
-  const updatedUser = await User.findByIdAndUpdate(
-    userId,
-    {
-      $set: {
-        'kyc_details.kycStatus': normalizedStatus,
-        'kyc_details.kycDocument': kycDocument,
-      },
-    },
-    { new: true, runValidators: true }
-  ).select('-password');
-
-  if (!updatedUser) {
-    return res.status(404).json({
-      success: false,
-      message: 'User not found',
-    });
-  }
-
-  res.status(200).json({
-    success: true,
-    message: `KYC details submitted successfully. Status is now ${normalizedStatus}.`,
-    data: updatedUser.kyc_details,
-  });
-});
 
 
 export const buyCoin = async (req, res) => {
@@ -1602,3 +1559,52 @@ export const verifyPayment = catchAsync(async (req, res) => {
 });
 
 
+export const setAccountInfoAndKyc = catchAsync(async (req, res) => {
+  const userId = req.user._id;
+
+  // Destructure everything from request body
+  let {
+    accountType,
+    professionType,
+    profession,
+    businessName,
+    ownerName,
+    panNumber,
+    panUrl
+  } = req.body;
+
+  // Find the user
+  const user = await User.findById(userId);
+  if (!user) {
+    return res.status(404).json({ success: false, message: 'User not found.' });
+  }
+
+  // Update account info
+  if (accountType) user.accountType = accountType;
+  if (professionType) user.professionType = professionType;
+  if (profession) user.profession = profession;
+
+  // Update KYC only if all fields are provided
+  if (businessName && ownerName && panNumber && panUrl) {
+    user.kyc_details = {
+      kycStatus: 'pending',
+      ownerName,
+      businessName,
+      panNumber,
+      panUrl
+    };
+    user.isKycVerified = false; // Reset verification status when new KYC is submitted
+  }
+
+  await user.save();
+
+  res.status(200).json({
+    success: true,
+    message: 'Account info and KYC details updated successfully.',
+    accountType: user.accountType,
+    professionType: user.professionType,
+    profession: user.profession,
+    kycDetails: user.kyc_details,
+    isKycVerified: user.isKycVerified
+  });
+});

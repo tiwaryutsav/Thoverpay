@@ -2,16 +2,6 @@ import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 
-// Single KYC Document schema
-const kycDocumentSchema = new mongoose.Schema(
-  {
-    businessName: { type: String, required: true, trim: true },
-    panNumber: { type: String, required: true, trim: true },
-    panImageUrl: { type: String, required: true, trim: true },
-  },
-  { _id: false }
-);
-
 const userSchema = new mongoose.Schema(
   {
     username: { type: String, required: true, trim: true },
@@ -35,41 +25,21 @@ const userSchema = new mongoose.Schema(
     bio: { type: String, default: '' },
     phoneNumber: { type: String, default: '' },
     isKycVerified: { type: Boolean, default: false },
+    isAdmin: { type: Boolean, default: false },
 
-    // KYC details object
+    // ✅ KYC details as a single embedded object
     kyc_details: {
-      kycStatus: {
-        type: String,
-        enum: [
-          'Not verified', 'not verified',
-          'Pending', 'pending',
-          'Verified', 'verified',
-          'Rejected', 'rejected'
-        ],
-        default: 'Pending',
-      },
-      kycDocument: {
-        type: kycDocumentSchema,
-        default: null,
-      },
+      kycStatus: { type: String, default: 'Not verified' },
+      ownerName: { type: String, default: null },
+      businessName: { type: String, default: null },
+      panNumber: { type: String, default: null },
+      panUrl: { type: String, default: null },
     },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
-// Normalize kycStatus to capitalized format before save
-userSchema.pre('save', function (next) {
-  if (this.kyc_details && this.kyc_details.kycStatus) {
-    let status = this.kyc_details.kycStatus.toLowerCase();
-    status = status.charAt(0).toUpperCase() + status.slice(1);
-    this.kyc_details.kycStatus = status;
-  }
-  next();
-});
-
-// Hash password before save
+// ✅ Hash password before save
 userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next();
 
@@ -78,22 +48,22 @@ userSchema.pre('save', async function (next) {
   next();
 });
 
-// Add userId from _id after save
+// ✅ Add userId from _id after save
 userSchema.post('save', async function (doc, next) {
   if (!doc.userId) {
     const shortId = doc._id.toString();
     doc.userId = shortId;
-    await doc.save({ validateBeforeSave: false }); // skip validation here
+    await doc.save();
   }
   next();
 });
 
-// Password comparison method
+// ✅ Password comparison method
 userSchema.methods.comparePassword = async function (candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
-// JWT token generation method
+// ✅ JWT token generation method
 userSchema.methods.generateAuthToken = async function () {
   const token = jwt.sign(
     { userId: this._id, username: this.username, email: this.email },
@@ -102,7 +72,7 @@ userSchema.methods.generateAuthToken = async function () {
   );
 
   this.token = token;
-  await this.save({ validateBeforeSave: false }); // skip enum validation
+  await this.save();
   return token;
 };
 
