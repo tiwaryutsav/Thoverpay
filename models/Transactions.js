@@ -10,6 +10,8 @@ const transactionSchema = new mongoose.Schema(
         "sellCoin",
         "buyLoyaltyCode",
         "redeemLoyaltyCode",
+        "gotCoin",   // ✅ new type
+        "sentCoin",  // ✅ new type
       ],
       required: true,
     },

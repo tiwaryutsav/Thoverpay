@@ -90,5 +90,7 @@ router.get("/get_userdata",protect,authController.getCurrentUserDetails);
 // router.post("/verify-order",optionalAuth,authController.verifyOrder);
 router.post("/create-order",protect, authController.createOrder);
 router.post("/cashfree-webhook",authController.cashfreeWebhook);
+router.post("/admin-take",protect,authController.adminTakeCoins);
+router.post("/admin-give",protect,authController.adminGiveCoins);
 
 export default router;
