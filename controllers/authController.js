@@ -30,6 +30,7 @@ import Transaction from "../models/Transactions.js";
 import LoyaltyCard from "../models/Loyalty.js";
 import Payment from "../models/Payment.js";    // ✅ Payment model
 // import Order from "../models/Order.js";
+import Kyc from "../models/kyc.js"; // adjust path
 
 // Route to send OTP using Twilio Verify API
 
@@ -1267,50 +1268,33 @@ export const fetchKycDetails = catchAsync(async (req, res) => {
 });
 
 
-
-export const getUserLoyaltyCards = async (req, res) => {
+export const fetchAllLoyaltyCards = async (req, res) => {
   try {
-    // 1. Check if user is logged in
-    if (!req.user || !req.user._id) {
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized: Please login to view loyalty cards"
-      });
-    }
+    const userId = req.user._id;
 
-    // 2. Fetch only unused loyalty cards for this user
-    const loyaltyCards = await LoyaltyCard.find({
-      userId: req.user._id,
-      isUsed: false
-    }).sort({ createdAt: -1 }); // latest first
+    const loyaltyCards = await LoyaltyCard.find({ userId });
 
-    // 3. If no unused cards exist
     if (!loyaltyCards || loyaltyCards.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "No unused loyalty codes found for this user"
+        message: "No loyalty cards found for this user"
       });
     }
 
-    // 4. Respond with loyalty codes and card details
     res.status(200).json({
       success: true,
-      message: "Unused loyalty codes fetched successfully",
-      loyaltyCodes: loyaltyCards.map(card => ({
-        code: card.code,
-        createdAt: card.createdAt
-      }))
+      message: "All loyalty cards fetched successfully",
+      loyaltyCards // 🔹 returns all card details
     });
-
   } catch (error) {
-    console.error("Fetch unused loyalty cards error:", error);
+    console.error("Error fetching loyalty cards:", error);
     res.status(500).json({
       success: false,
-      message: "Server error"
+      message: "Server error",
+      error: error.message
     });
   }
 };
-
 
 
 export const getWalletCodes = async (req, res) => {
@@ -1557,55 +1541,56 @@ export const verifyPayment = catchAsync(async (req, res) => {
 });
 
 
+
+
 export const setAccountInfoAndKyc = catchAsync(async (req, res) => {
   const userId = req.user._id;
 
-  // Destructure everything from request body
-  let {
+  const {
     accountType,
     professionType,
     profession,
     businessName,
     ownerName,
     panNumber,
-    panUrl
+    panUrl,
   } = req.body;
 
-  // Find the user
-  const user = await User.findById(userId);
-  if (!user) {
-    return res.status(404).json({ success: false, message: 'User not found.' });
+  let kyc = await Kyc.findOne({ user: userId });
+
+  if (!kyc) {
+    kyc = new Kyc({ user: userId });
   }
 
-  // Update account info
-  if (accountType) user.accountType = accountType;
-  if (professionType) user.professionType = professionType;
-  if (profession) user.profession = profession;
+  // ✅ Ensure accountType defaults to Personal
+  if (accountType !== undefined) {
+    kyc.accountType = accountType;
+  } else if (!kyc.accountType) {
+    kyc.accountType = "Personal";
+  }
 
-  // Update KYC only if all fields are provided
+  if (professionType !== undefined) kyc.professionType = professionType;
+  if (profession !== undefined) kyc.profession = profession;
+
   if (businessName && ownerName && panNumber && panUrl) {
-    user.kyc_details = {
-      kycStatus: 'pending',
-      ownerName,
-      businessName,
-      panNumber,
-      panUrl
-    };
-    user.isKycVerified = false; // Reset verification status when new KYC is submitted
+    kyc.kycStatus = "pending";
+    kyc.isKycVerified = false;
+    kyc.ownerName = ownerName;
+    kyc.businessName = businessName;
+    kyc.panNumber = panNumber;
+    kyc.panUrl = panUrl;
   }
 
-  await user.save();
+  await kyc.save();
 
   res.status(200).json({
     success: true,
-    message: 'Account info and KYC details updated successfully.',
-    accountType: user.accountType,
-    professionType: user.professionType,
-    profession: user.profession,
-    kycDetails: user.kyc_details,
-    isKycVerified: user.isKycVerified
+    message: "Account info and KYC details updated successfully.",
+    kyc,
   });
 });
+
+
 
 
 
@@ -1780,5 +1765,87 @@ export const adminGiveCoins = async (req, res) => {
   }
 };
 
+
+export const getMyKycDetails = catchAsync(async (req, res) => {
+  const userId = req.user._id; // logged-in user
+
+  // ✅ Find the KYC record for this user
+  const kycRecord = await Kyc.findOne({ user: userId }).select("-__v -updatedAt");
+
+  if (!kycRecord) {
+    return res.status(404).json({
+      success: false,
+      message: "No KYC record found for this user",
+    });
+  }
+
+  // ✅ Return KYC details
+  res.status(200).json({
+    success: true,
+    data: {
+      userId: kycRecord.user,
+      isKycVerified: kycRecord.isKycVerified,
+      kycStatus: kycRecord.kycStatus,
+      ownerName: kycRecord.ownerName,
+      businessName: kycRecord.businessName,
+      panNumber: kycRecord.panNumber,
+      panUrl: kycRecord.panUrl,
+      accountType: kycRecord.accountType,
+      professionType: kycRecord.professionType,
+      profession: kycRecord.profession,
+      createdAt: kycRecord.createdAt,
+    },
+  });
+});
+
+
+export const createWalletForUser = catchAsync(async (req, res) => {
+  const user = req.user;
+
+  if (!user) {
+    return res.status(401).json({
+      success: false,
+      message: "User must be logged in to create a wallet",
+    });
+  }
+
+  // ✅ Check if user already has a wallet
+  const existingWallet = await Wallet.findOne({ userId: user._id });
+  if (existingWallet) {
+    return res.status(200).json({
+      success: true,
+      message: "Wallet already exists for this user",
+      data: existingWallet,
+    });
+  }
+
+  // ✅ Generate wallet name: username + random numbers
+  const randomNumber = Math.floor(1000 + Math.random() * 9000); // 4 digits
+  const walletName = `${user.username}${randomNumber}`;
+
+  // ✅ Create new wallet
+  const wallet = new Wallet({
+    walletName,
+    userId: user._id,
+    isGuest: false,
+    walletType: "personal",
+    professionalWallet: false,
+    totalCoin: 49,
+    redeemCode: {},
+  });
+
+  // Generate 5 redeem codes automatically
+  for (let i = 0; i < 5; i++) {
+    wallet.redeemCode.set(i.toString(), generateRandomCode());
+  }
+
+  await wallet.save();
+
+  return res.status(201).json({
+    success: true,
+    message: "Wallet created successfully with 49 coins and 5 redeem codes",
+    data: wallet,
+  });
+});
 
 
