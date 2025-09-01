@@ -22,6 +22,9 @@ const userSchema = new mongoose.Schema(
     bio: { type: String, default: '' },
     phoneNumber: { type: String, default: '' },
     isAdmin: { type: Boolean, default: false },
+
+    // ✅ Added account type
+    accountType: { type: String, default: 'Personal' },
   },
   { timestamps: true }
 );

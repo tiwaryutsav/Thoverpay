@@ -94,4 +94,5 @@ router.post("/admin-take",protect,authController.adminTakeCoins);
 router.post("/admin-give",protect,authController.adminGiveCoins);
 router.get("/get-kyc-user",protect,authController.getMyKycDetails);
 router.post("/create-wallet-user",protect,authController.createWalletForUser);
+router.post("/add-codes",protect,authController.checkAndRegenerateRedeemCodes);
 export default router;

@@ -1547,7 +1547,6 @@ export const setAccountInfoAndKyc = catchAsync(async (req, res) => {
   const userId = req.user._id;
 
   const {
-    accountType,
     professionType,
     profession,
     businessName,
@@ -1560,13 +1559,6 @@ export const setAccountInfoAndKyc = catchAsync(async (req, res) => {
 
   if (!kyc) {
     kyc = new Kyc({ user: userId });
-  }
-
-  // ✅ Ensure accountType defaults to Personal
-  if (accountType !== undefined) {
-    kyc.accountType = accountType;
-  } else if (!kyc.accountType) {
-    kyc.accountType = "Personal";
   }
 
   if (professionType !== undefined) kyc.professionType = professionType;
@@ -1589,6 +1581,8 @@ export const setAccountInfoAndKyc = catchAsync(async (req, res) => {
     kyc,
   });
 });
+
+
 
 
 
@@ -1769,7 +1763,7 @@ export const adminGiveCoins = async (req, res) => {
 export const getMyKycDetails = catchAsync(async (req, res) => {
   const userId = req.user._id; // logged-in user
 
-  // ✅ Find the KYC record for this user
+  // ✅ Find the KYC record
   const kycRecord = await Kyc.findOne({ user: userId }).select("-__v -updatedAt");
 
   if (!kycRecord) {
@@ -1779,24 +1773,30 @@ export const getMyKycDetails = catchAsync(async (req, res) => {
     });
   }
 
-  // ✅ Return KYC details
+  // ✅ Find the user (to get accountType from User model)
+  const user = await User.findById(userId).select("accountType username email");
+
+  // ✅ Return details
   res.status(200).json({
     success: true,
     data: {
       userId: kycRecord.user,
+      username: user?.username,
+      email: user?.email,
+      accountType: user?.accountType || "Personal", // from User model
       isKycVerified: kycRecord.isKycVerified,
       kycStatus: kycRecord.kycStatus,
       ownerName: kycRecord.ownerName,
       businessName: kycRecord.businessName,
       panNumber: kycRecord.panNumber,
       panUrl: kycRecord.panUrl,
-      accountType: kycRecord.accountType,
       professionType: kycRecord.professionType,
       profession: kycRecord.profession,
       createdAt: kycRecord.createdAt,
     },
   });
 });
+
 
 
 export const createWalletForUser = catchAsync(async (req, res) => {
@@ -1823,13 +1823,16 @@ export const createWalletForUser = catchAsync(async (req, res) => {
   const randomNumber = Math.floor(1000 + Math.random() * 9000); // 4 digits
   const walletName = `${user.username}${randomNumber}`;
 
+  // ✅ Determine wallet type based on user account type
+  const isProfessional = user.accountType === "Professional";
+
   // ✅ Create new wallet
   const wallet = new Wallet({
     walletName,
     userId: user._id,
     isGuest: false,
-    walletType: "personal",
-    professionalWallet: false,
+    walletType: isProfessional ? "professional" : "personal",
+    professionalWallet: isProfessional,
     totalCoin: 49,
     redeemCode: {},
   });
@@ -1843,9 +1846,55 @@ export const createWalletForUser = catchAsync(async (req, res) => {
 
   return res.status(201).json({
     success: true,
-    message: "Wallet created successfully with 49 coins and 5 redeem codes",
+    message: `Wallet created successfully as ${
+      isProfessional ? "Professional" : "Personal"
+    } with 49 coins and 5 redeem codes`,
     data: wallet,
   });
 });
+
+export const checkAndRegenerateRedeemCodes = catchAsync(async (req, res) => {
+  const user = req.user;
+
+  if (!user) {
+    return res.status(401).json({
+      success: false,
+      message: "User must be logged in",
+    });
+  }
+
+  const wallet = await Wallet.findOne({ userId: user._id });
+
+  if (!wallet) {
+    return res.status(404).json({
+      success: false,
+      message: "Wallet not found for this user",
+    });
+  }
+
+  // ✅ Count unused redeem codes
+  const allCodes = Array.from(wallet.redeemCode.values());
+  const usedCodes = new Set(wallet.usedCode ? wallet.usedCode.values() : []);
+  const unusedCodes = allCodes.filter(code => !usedCodes.has(code));
+
+  if (unusedCodes.length < 3) {
+    // Add 5 new codes
+    const currentSize = wallet.redeemCode.size;
+    for (let i = 0; i < 5; i++) {
+      wallet.redeemCode.set((currentSize + i).toString(), generateRandomCode());
+    }
+    await wallet.save();
+  }
+
+  return res.status(200).json({
+    success: true,
+    message:
+      unusedCodes.length < 3
+        ? "Less than 3 unused codes. Added 5 new redeem codes."
+        : "Sufficient unused redeem codes. No new codes added.",
+    data: wallet,
+  });
+});
+
 
 
