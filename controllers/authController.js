@@ -1240,34 +1240,6 @@ export const getWalletTransactions = async (req, res) => {
 
 
 
-
-export const fetchKycDetails = catchAsync(async (req, res) => {
-  const { userId } = req.body; // or query parameter if you prefer
-
-  if (!userId) {
-    return res.status(400).json({
-      success: false,
-      message: "userId is required in request body",
-    });
-  }
-
-  const user = await User.findById(userId).select('username email isKycVerified kyc_details');
-
-  if (!user) {
-    return res.status(404).json({
-      success: false,
-      message: 'User not found',
-    });
-  }
-
-  return res.status(200).json({
-    success: true,
-    message: 'Fetched KYC details',
-    data: user,
-  });
-});
-
-
 export const fetchAllLoyaltyCards = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -1358,190 +1330,6 @@ export const getCurrentUserDetails = catchAsync(async (req, res) => {
   });
 });
 
-//ROUTES FOR ORIGNAL LOGIN
-
-
-
-
-
-
-export const cashfreeWebhook = async (req, res) => {
-  try {
-    const data = req.body;
-    const signature = req.headers["x-webhook-signature"]; // Cashfree HMAC
-
-    // Compute signature
-    const computedSignature = crypto
-      .createHmac("sha256", process.env.CASHFREE_WEBHOOK_SECRET)
-      .update(JSON.stringify(data))
-      .digest("base64"); // Make sure format matches Cashfree
-
-    if (signature !== computedSignature) {
-      console.log("❌ Invalid signature");
-      return res.status(401).json({ success: false, message: "Invalid signature" });
-    }
-
-    console.log("✅ Webhook received:", data);
-
-    // Extract payment info
-    const { orderId, referenceId, orderAmount, orderStatus, paymentMode } = data;
-
-    if (!orderId) {
-      return res.status(400).json({ success: false, message: "Missing orderId" });
-    }
-
-    // Update DB
-    const updated = await Payment.findOneAndUpdate(
-      { orderId: orderId },
-      {
-        status: orderStatus,
-        referenceId: referenceId,
-        paymentMode: paymentMode,
-        amount: orderAmount,
-        updatedAt: new Date(),
-      },
-      { new: true } // return updated document
-    );
-
-    if (!updated) {
-      console.log(`❌ Order not found: ${orderId}`);
-      return res.status(404).json({ success: false, message: "Order not found" });
-    }
-
-    console.log("✅ Payment updated:", updated);
-
-    return res.status(200).json({ success: true });
-  } catch (err) {
-    console.error("Webhook error:", err);
-    return res.status(500).json({ success: false, message: "Server error" });
-  }
-};
-
-
-
-
-// ✅ Step 1: Create Cashfree Order
-export const createOrder = catchAsync(async (req, res) => {
-  const { amount, currency, phone } = req.body;
-  const userId = req.user?.id;
-
-  if (!userId) {
-    return res.status(401).json({ success: false, message: "User not logged in" });
-  }
-
-  if (!amount) {
-    return res.status(400).json({ success: false, message: "Amount is required" });
-  }
-
-  if (!phone || phone.trim() === "") {
-    return res.status(400).json({ success: false, message: "Phone number is required" });
-  }
-
-  try {
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ success: false, message: "User not found" });
-    }
-
-    const cashfreeUrl = `${process.env.CASHFREE_API_URL}/orders`;
-
-    // ✅ Payload without custom order_id (Cashfree will generate it)
-    const orderPayload = {
-      order_amount: amount,
-      order_currency: currency || "INR",
-      customer_details: {
-        customer_id: userId.toString(),
-        customer_email: user.email || "test@example.com",
-        customer_phone: phone,
-        customer_name: user.name || "Customer",
-      },
-      order_meta: {
-        return_url: "myapp://payment-success", // mobile deep link
-      },
-    };
-
-    const cashfreeResponse = await axios.post(cashfreeUrl, orderPayload, {
-      headers: {
-        "Content-Type": "application/json",
-        "x-client-id": process.env.CASHFREE_APP_ID,
-        "x-client-secret": process.env.CASHFREE_SECRET_KEY,
-        "x-api-version": "2022-09-01",
-      },
-    });
-
-    const data = cashfreeResponse.data;
-
-    // ✅ Save PENDING order in DB
-    await Payment.create({
-      orderId: data.order_id,  // From Cashfree
-      amount,
-      currency: currency || "INR",
-      status: "PENDING",
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: "Order created successfully",
-      data: {
-        order_id: data.order_id,
-        payment_session_id: data.payment_session_id,
-      },
-    });
-  } catch (error) {
-    console.error("Error creating Cashfree order:", error.response?.data || error.message);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to create order",
-      error: error.response?.data || error.message,
-    });
-  }
-});
-
-// ✅ Step 2: Verify Payment (Webhook or frontend callback)
-export const verifyPayment = catchAsync(async (req, res) => {
-  try {
-    const { orderId } = req.body; // frontend sends order_id after success
-
-    const cashfreeUrl = `${process.env.CASHFREE_API_URL}/orders/${orderId}/payments`;
-
-    const response = await axios.get(cashfreeUrl, {
-      headers: {
-        "x-client-id": process.env.CASHFREE_APP_ID,
-        "x-client-secret": process.env.CASHFREE_SECRET_KEY,
-        "x-api-version": "2022-09-01",
-      },
-    });
-
-    const paymentData = response.data[0]; // latest payment attempt
-
-    // ✅ Update DB with actual payment status
-    await Payment.findOneAndUpdate(
-      { orderId },
-      {
-        status: paymentData.payment_status,
-        referenceId: paymentData.cf_payment_id, // Cashfree Payment ID
-        paymentMode: paymentData.payment_group,
-      },
-      { new: true }
-    );
-
-    return res.status(200).json({
-      success: true,
-      message: "Payment verified successfully",
-      data: paymentData,
-    });
-  } catch (error) {
-    console.error("Error verifying payment:", error.response?.data || error.message);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to verify payment",
-      error: error.response?.data || error.message,
-    });
-  }
-});
-
-
-
 
 export const setAccountInfoAndKyc = catchAsync(async (req, res) => {
   const userId = req.user._id;
@@ -1582,182 +1370,6 @@ export const setAccountInfoAndKyc = catchAsync(async (req, res) => {
   });
 });
 
-
-
-
-
-
-
-
-// 🔹 Admin takes coins from any user wallet
-export const adminTakeCoins = async (req, res) => {
-  try {
-    const { walletName, coins } = req.body;
-
-    // ✅ check admin by isAdmin flag
-    if (!req.user || !req.user.isAdmin) {
-      return res.status(403).json({
-        success: false,
-        message: "Forbidden: Admin access only",
-      });
-    }
-
-    // ✅ find the user's wallet
-    const userWallet = await Wallet.findOne({ walletName });
-    if (!userWallet) {
-      return res.status(404).json({
-        success: false,
-        message: "Wallet not found for this user",
-      });
-    }
-
-    // ✅ check balance
-    if (userWallet.totalCoin < coins) {
-      return res.status(400).json({
-        success: false,
-        message: "Insufficient balance in user wallet",
-      });
-    }
-
-    // ✅ deduct coins from user
-    userWallet.totalCoin -= coins;
-    await userWallet.save();
-
-    // ✅ find admin's wallet
-    const adminWallet = await Wallet.findOne({ userId: req.user._id });
-    if (!adminWallet) {
-      return res.status(404).json({
-        success: false,
-        message: "Admin wallet not found",
-      });
-    }
-
-    // ✅ add coins to admin
-    adminWallet.totalCoin += coins;
-    await adminWallet.save();
-
-    // ✅ log transaction for user (sentCoin)
-    await Transaction.create({
-      transactionType: "sentCoin",
-      userId: userWallet.userId,
-      coin: coins,
-      fromWallet: userWallet._id,
-      toWallet: adminWallet._id,
-    });
-
-    // ✅ log transaction for admin (gotCoin)
-    await Transaction.create({
-      transactionType: "gotCoin",
-      userId: req.user._id,
-      coin: coins,
-      fromWallet: userWallet._id,
-      toWallet: adminWallet._id,
-    });
-
-    res.json({
-      success: true,
-      message: `Successfully transferred ${coins} coins from "${walletName}" to admin`,
-    });
-  } catch (error) {
-    console.error("Admin take coins error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: error.message,
-    });
-  }
-};
-
-// 🔹 Admin gives coins to any user wallet
-// 🔹 Admin gives coins to any user wallet
-export const adminGiveCoins = async (req, res) => {
-  try {
-    const { walletName, coins } = req.body;
-
-    // ✅ Validate input
-    if (!walletName || !coins || coins <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Wallet name and positive coin amount are required",
-      });
-    }
-
-    // ✅ check admin by isAdmin flag
-    if (!req.user || !req.user.isAdmin) {
-      return res.status(403).json({
-        success: false,
-        message: "Forbidden: Admin access only",
-      });
-    }
-
-    // ✅ find the user's wallet
-    const userWallet = await Wallet.findOne({ walletName });
-    if (!userWallet) {
-      return res.status(404).json({
-        success: false,
-        message: "Wallet not found for this user",
-      });
-    }
-
-    // ✅ find admin's wallet
-    const adminWallet = await Wallet.findOne({ userId: req.user._id });
-    if (!adminWallet) {
-      return res.status(404).json({
-        success: false,
-        message: "Admin wallet not found",
-      });
-    }
-
-    // ✅ check if admin has enough coins
-    if (adminWallet.totalCoin < coins) {
-      return res.status(400).json({
-        success: false,
-        message: "Insufficient balance in admin wallet",
-      });
-    }
-
-    // ✅ perform transfer
-    adminWallet.totalCoin -= coins;
-    userWallet.totalCoin += coins;
-
-    // ✅ save both wallets in parallel
-    await Promise.all([adminWallet.save(), userWallet.save()]);
-
-    // ✅ log transactions (await both to ensure saved)
-    const [sentTx, gotTx] = await Promise.all([
-      Transaction.create({
-        transactionType: "sentCoin",
-        userId: req.user._id,       // admin ID
-        coin: coins,
-        fromWallet: adminWallet._id,
-        toWallet: userWallet._id,
-      }),
-      Transaction.create({
-        transactionType: "gotCoin",
-        userId: userWallet.userId,  // user ID
-        coin: coins,
-        fromWallet: adminWallet._id,
-        toWallet: userWallet._id,
-      }),
-    ]);
-
-    console.log("✅ Sent transaction:", sentTx._id);
-    console.log("✅ Got transaction:", gotTx._id);
-
-    res.json({
-      success: true,
-      message: `Successfully transferred ${coins} coins from admin to "${walletName}"`,
-      data: { sentTx, gotTx },
-    });
-  } catch (error) {
-    console.error("Admin give coins error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: error.message,
-    });
-  }
-};
 
 
 export const getMyKycDetails = catchAsync(async (req, res) => {
@@ -1898,3 +1510,25 @@ export const checkAndRegenerateRedeemCodes = catchAsync(async (req, res) => {
 
 
 
+export const fetchKycDetails = catchAsync(async (req, res) => {
+  const userId = req.user._id; // ✅ logged-in user
+
+  // ✅ Find KYC details for this user
+  const kyc = await Kyc.findOne({ user: userId }).select(
+    "kycStatus isKycVerified ownerName businessName panNumber panUrl professionType profession createdAt updatedAt"
+  );
+
+  if (!kyc) {
+    return res.status(200).json({
+      success: true,
+      message: "KYC not submitted",
+      data: null,
+    });
+  }
+
+  return res.status(200).json({
+    success: true,
+    message: "Fetched KYC details",
+    data: kyc,
+  });
+});
