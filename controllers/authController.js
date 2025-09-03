@@ -1339,8 +1339,9 @@ export const setAccountInfoAndKyc = catchAsync(async (req, res) => {
     profession,
     businessName,
     ownerName,
-    panNumber,
-    panUrl,
+    document_no,
+    document_name,
+    document_url,
   } = req.body;
 
   let kyc = await Kyc.findOne({ user: userId });
@@ -1349,16 +1350,19 @@ export const setAccountInfoAndKyc = catchAsync(async (req, res) => {
     kyc = new Kyc({ user: userId });
   }
 
+  // ✅ update optional profession details
   if (professionType !== undefined) kyc.professionType = professionType;
   if (profession !== undefined) kyc.profession = profession;
 
-  if (businessName && ownerName && panNumber && panUrl) {
+  // ✅ update KYC details if all are present
+  if (businessName && ownerName && document_no && document_name && document_url) {
     kyc.kycStatus = "pending";
     kyc.isKycVerified = false;
     kyc.ownerName = ownerName;
     kyc.businessName = businessName;
-    kyc.panNumber = panNumber;
-    kyc.panUrl = panUrl;
+    kyc.document_no = document_no;
+    kyc.document_name = document_name;
+    kyc.document_url = document_url;
   }
 
   await kyc.save();
@@ -1395,13 +1399,14 @@ export const getMyKycDetails = catchAsync(async (req, res) => {
       userId: kycRecord.user,
       username: user?.username,
       email: user?.email,
-      accountType: user?.accountType || "Personal", // from User model
+      accountType: user?.accountType || "Personal", // fallback
       isKycVerified: kycRecord.isKycVerified,
       kycStatus: kycRecord.kycStatus,
       ownerName: kycRecord.ownerName,
       businessName: kycRecord.businessName,
-      panNumber: kycRecord.panNumber,
-      panUrl: kycRecord.panUrl,
+      document_no: kycRecord.document_no,
+      document_name: kycRecord.document_name,
+      document_url: kycRecord.document_url,
       professionType: kycRecord.professionType,
       profession: kycRecord.profession,
       createdAt: kycRecord.createdAt,
@@ -1515,7 +1520,7 @@ export const fetchKycDetails = catchAsync(async (req, res) => {
 
   // ✅ Find KYC details for this user
   const kyc = await Kyc.findOne({ user: userId }).select(
-    "kycStatus isKycVerified ownerName businessName panNumber panUrl professionType profession createdAt updatedAt"
+    "kycStatus isKycVerified ownerName businessName document_no document_name document_url professionType profession createdAt updatedAt"
   );
 
   if (!kyc) {
