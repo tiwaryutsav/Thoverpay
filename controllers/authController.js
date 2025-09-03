@@ -1344,26 +1344,40 @@ export const setAccountInfoAndKyc = catchAsync(async (req, res) => {
     document_url,
   } = req.body;
 
+  // 🔹 Check if all required fields are present
+  if (
+    !professionType ||
+    !profession ||
+    !businessName ||
+    !ownerName ||
+    !document_no ||
+    !document_name ||
+    !document_url
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "All fields are required to submit KYC.",
+    });
+  }
+
   let kyc = await Kyc.findOne({ user: userId });
 
   if (!kyc) {
     kyc = new Kyc({ user: userId });
   }
 
-  // ✅ update optional profession details
-  if (professionType !== undefined) kyc.professionType = professionType;
-  if (profession !== undefined) kyc.profession = profession;
+  // ✅ Save all details
+  kyc.professionType = professionType;
+  kyc.profession = profession;
+  kyc.businessName = businessName;
+  kyc.ownerName = ownerName;
+  kyc.document_no = document_no;
+  kyc.document_name = document_name;
+  kyc.document_url = document_url;
 
-  // ✅ update KYC details if all are present
-  if (businessName && ownerName && document_no && document_name && document_url) {
-    kyc.kycStatus = "pending";
-    kyc.isKycVerified = false;
-    kyc.ownerName = ownerName;
-    kyc.businessName = businessName;
-    kyc.document_no = document_no;
-    kyc.document_name = document_name;
-    kyc.document_url = document_url;
-  }
+  // ✅ Reset KYC status
+  kyc.kycStatus = "pending";
+  kyc.isKycVerified = false;
 
   await kyc.save();
 
@@ -1373,8 +1387,6 @@ export const setAccountInfoAndKyc = catchAsync(async (req, res) => {
     kyc,
   });
 });
-
-
 
 export const getMyKycDetails = catchAsync(async (req, res) => {
   const userId = req.user._id; // logged-in user

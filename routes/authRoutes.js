@@ -72,7 +72,7 @@ router.get('/total-users', authController.getTotalUsers);
 // router.post('/submit_startup', authController.submitLaunchPadForm);
 // router.get('/all_startup', authController.getAllLaunchPads);
 router.post('/create-wallet', optionalAuth,authController.createWallet);
-router.post('/submit-kyc', protect, authController.setAccountInfoAndKyc);
+router.post('/account-kyc', protect, authController.setAccountInfoAndKyc);
 router.post('/coins-buy', optionalAuth, authController.buyCoin);
 router.post('/coins-sell', protect, authController.sellCoins);
 router.post('/transfer-coin', protect, authController.transferCoins);
