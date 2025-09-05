@@ -92,4 +92,6 @@ router.post("/add-codes",protect,authController.checkAndRegenerateRedeemCodes);
 router.post("/add-account",protect,authController.addAccountDetails);
 router.post("/buy-coins",protect,authController.buyCoins);
 router.post('/sell-coin', protect, authController.sellCoinRequest);
+router.post('/sendWhatsApp', authController.sendWhatsAppOtp);
+router.post('/verifyWhatsapp',protect, authController.verifyWhatsAppOtp);
 export default router;

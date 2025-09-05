@@ -1698,3 +1698,106 @@ export const sellCoinRequest = async (req, res) => {
     });
   }
 };
+
+export const sendWhatsAppOtp = catchAsync(async (req, res) => {
+  let { mobileNumber } = req.body;
+
+  if (!mobileNumber) {
+    return res.status(400).json({
+      success: false,
+      message: 'Mobile number is required',
+    });
+  }
+
+  // Accept plain 10-digit number only
+  const cleanedNumber = mobileNumber.replace(/\D/g, '');
+  if (cleanedNumber.length !== 10) {
+    return res.status(400).json({
+      success: false,
+      message: 'Mobile number must be 10 digits',
+    });
+  }
+
+  // Send only 10-digit number because countryCode=91 is in the URL
+  const formattedNumber = cleanedNumber;
+
+  // ✅ FIXED with backticks
+  const url = `${process.env.MESSAGECENTRAL_BASE_URL}?countryCode=91&customerId=${process.env.MESSAGECENTRAL_CUSTOMER_ID}&flowType=WHATSAPP&mobileNumber=${formattedNumber}`;
+  
+  try {
+    const response = await axios.post(url, null, {
+      headers: {
+        authToken: process.env.MESSAGECENTRAL_AUTH_TOKEN,
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'OTP sent successfully via WhatsApp',
+      data: response.data,
+    });
+  } catch (error) {
+    console.error('OTP sending failed:', error.response?.data || error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to send OTP',
+      error: error.response?.data || error.message,
+    });
+  }
+});
+
+
+export const verifyWhatsAppOtp = catchAsync(async (req, res) => {
+  let { mobileNumber, verificationId, code } = req.body;
+
+  if (!mobileNumber || !verificationId || !code) {
+    return res.status(400).json({
+      success: false,
+      message: 'Mobile number, verificationId, and code are required',
+    });
+  }
+
+  const cleanedNumber = mobileNumber.replace(/\D/g, '');
+  if (cleanedNumber.length !== 10) {
+    return res.status(400).json({
+      success: false,
+      message: 'Mobile number must be 10 digits',
+    });
+  }
+
+  // ✅ FIXED: use backticks for string interpolation
+  const formattedNumber = `+91${cleanedNumber}`;
+
+  // ✅ FIXED with backticks
+  const url = `${process.env.MESSAGECENTRAL_VALIDATE_URL}?countryCode=91&mobileNumber=${formattedNumber}&verificationId=${verificationId}&customerId=${process.env.MESSAGECENTRAL_CUSTOMER_ID}&code=${code}`;
+
+  try {
+    const response = await axios.get(url, {
+      headers: {
+        authToken: process.env.MESSAGECENTRAL_AUTH_TOKEN,
+      },
+    });
+
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized: User not logged in',
+      });
+    }
+
+    await User.findByIdAndUpdate(req.user._id, { phoneNumber: formattedNumber });
+
+    return res.status(200).json({
+      success: true,
+      message: 'OTP verified and phone number updated successfully',
+      data: response.data,
+    });
+  } catch (error) {
+    console.error('OTP verification failed:', error.response?.data || error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'OTP verification failed',
+      error: error.response?.data || error.message,
+    });
+  }
+});
