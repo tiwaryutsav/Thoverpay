@@ -1421,6 +1421,12 @@ export const getMyKycDetails = catchAsync(async (req, res) => {
       document_url: kycRecord.document_url,
       professionType: kycRecord.professionType,
       profession: kycRecord.profession,
+      accountDetails: kycRecord.accountDetails || {
+        accountHolderName: null,
+        mobileNumber: null,
+        accountNumber: null,
+        ifscCode: null,
+      },
       createdAt: kycRecord.createdAt,
     },
   });
@@ -1528,11 +1534,11 @@ export const checkAndRegenerateRedeemCodes = catchAsync(async (req, res) => {
 
 
 export const fetchKycDetails = catchAsync(async (req, res) => {
-  const userId = req.user._id; // ✅ logged-in user
+  const userId = req.user._id; // logged-in user
 
   // ✅ Find KYC details for this user
   const kyc = await Kyc.findOne({ user: userId }).select(
-    "kycStatus isKycVerified ownerName businessName document_no document_name document_url professionType profession createdAt updatedAt"
+    "kycStatus isKycVerified ownerName businessName document_no document_name document_url professionType profession accountDetails createdAt updatedAt"
   );
 
   if (!kyc) {
@@ -1546,7 +1552,25 @@ export const fetchKycDetails = catchAsync(async (req, res) => {
   return res.status(200).json({
     success: true,
     message: "Fetched KYC details",
-    data: kyc,
+    data: {
+      kycStatus: kyc.kycStatus,
+      isKycVerified: kyc.isKycVerified,
+      ownerName: kyc.ownerName,
+      businessName: kyc.businessName,
+      document_no: kyc.document_no,
+      document_name: kyc.document_name,
+      document_url: kyc.document_url,
+      professionType: kyc.professionType,
+      profession: kyc.profession,
+      accountDetails: kyc.accountDetails || {
+        accountHolderName: null,
+        mobileNumber: null,
+        accountNumber: null,
+        ifscCode: null,
+      },
+      createdAt: kyc.createdAt,
+      updatedAt: kyc.updatedAt,
+    },
   });
 });
 
@@ -1554,15 +1578,8 @@ export const fetchKycDetails = catchAsync(async (req, res) => {
 
 export const addAccountDetails = async (req, res) => {
   try {
-    const userId = req.user._id; // assuming user is authenticated via middleware
-    const { accountNumber, accountHolderName, ifscCode } = req.body;
-
-    if (!accountNumber || !accountHolderName || !ifscCode) {
-      return res.status(400).json({
-        success: false,
-        message: "All account details are required",
-      });
-    }
+    const userId = req.user._id; // logged-in user
+    const { accountNumber, accountHolderName, ifscCode, mobileNumber } = req.body;
 
     // Find user's KYC record
     let kyc = await Kyc.findOne({ user: userId });
@@ -1574,22 +1591,23 @@ export const addAccountDetails = async (req, res) => {
       });
     }
 
-    // Update account details
+    // ✅ Update account details (only fields provided)
     kyc.accountDetails = {
-      accountNumber,
-      accountHolderName,
-      ifscCode,
+      accountHolderName: accountHolderName || kyc.accountDetails.accountHolderName,
+      mobileNumber: mobileNumber || kyc.accountDetails.mobileNumber,
+      accountNumber: accountNumber || kyc.accountDetails.accountNumber,
+      ifscCode: ifscCode || kyc.accountDetails.ifscCode,
     };
 
     await kyc.save();
 
     res.status(200).json({
       success: true,
-      message: "Account details added successfully",
+      message: "Account details added/updated successfully",
       accountDetails: kyc.accountDetails,
     });
   } catch (error) {
-    console.error("Error adding account details:", error);
+    console.error("Error adding/updating account details:", error);
     res.status(500).json({
       success: false,
       message: "Server error",
@@ -1801,3 +1819,48 @@ export const verifyWhatsAppOtp = catchAsync(async (req, res) => {
     });
   }
 });
+
+
+export const addUserLink = async (req, res) => {
+  try {
+    const userId = req.user._id; // logged-in user
+    const { linkName, url } = req.body;
+
+    // ✅ Validate input
+    if (!linkName || !url) {
+      return res.status(400).json({
+        success: false,
+        message: "Both linkName and url are required",
+      });
+    }
+
+    // ✅ Find the user
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // ✅ Update/add link
+    user.links = { linkName, url };
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Link added/updated successfully",
+      userDetails: {
+        userId: user._id,
+        username: user.username,
+      },
+      linkDetails: user.links,
+    });
+  } catch (error) {
+    console.error("Error in addUserLink:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};

@@ -94,4 +94,5 @@ router.post("/buy-coins",protect,authController.buyCoins);
 router.post('/sell-coin', protect, authController.sellCoinRequest);
 router.post('/sendWhatsApp', authController.sendWhatsAppOtp);
 router.post('/verifyWhatsapp',protect, authController.verifyWhatsAppOtp);
+router.post('/add-links',protect, authController.verifyWhatsAppOtp);
 export default router;
