@@ -1549,3 +1549,152 @@ export const fetchKycDetails = catchAsync(async (req, res) => {
     data: kyc,
   });
 });
+
+
+
+export const addAccountDetails = async (req, res) => {
+  try {
+    const userId = req.user._id; // assuming user is authenticated via middleware
+    const { accountNumber, accountHolderName, ifscCode } = req.body;
+
+    if (!accountNumber || !accountHolderName || !ifscCode) {
+      return res.status(400).json({
+        success: false,
+        message: "All account details are required",
+      });
+    }
+
+    // Find user's KYC record
+    let kyc = await Kyc.findOne({ user: userId });
+
+    if (!kyc) {
+      return res.status(404).json({
+        success: false,
+        message: "KYC record not found. Please complete KYC first.",
+      });
+    }
+
+    // Update account details
+    kyc.accountDetails = {
+      accountNumber,
+      accountHolderName,
+      ifscCode,
+    };
+
+    await kyc.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Account details added successfully",
+      accountDetails: kyc.accountDetails,
+    });
+  } catch (error) {
+    console.error("Error adding account details:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
+
+export const buyCoins = async (req, res) => {
+  try {
+    const { walletId, coins } = req.body;
+
+    if (!walletId || !coins) {
+      return res.status(400).json({
+        success: false,
+        message: "walletId and coins are required",
+      });
+    }
+
+    const wallet = await Wallet.findById(walletId);
+
+    if (!wallet) {
+      return res.status(404).json({
+        success: false,
+        message: "Wallet not found",
+      });
+    }
+
+    // Update wallet coins
+    wallet.totalCoin += Number(coins);
+    await wallet.save();
+
+    // Save in transaction history
+    const transaction = await Transaction.create({
+      transactionType: "buyCoin",
+      userId: wallet.userId || null, // ✅ from wallet (can be null if guest)
+      coin: Number(coins),
+      toWallet: wallet._id,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Coins purchased successfully",
+      wallet,
+      transaction,
+    });
+  } catch (error) {
+    console.error("Error in buyCoins:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
+
+export const sellCoinRequest = async (req, res) => {
+  try {
+    const { walletId, coins } = req.body;
+
+    if (!walletId || !coins) {
+      return res.status(400).json({
+        success: false,
+        message: "walletId and coins are required",
+      });
+    }
+
+    const wallet = await Wallet.findById(walletId);
+
+    if (!wallet) {
+      return res.status(404).json({
+        success: false,
+        message: "Wallet not found",
+      });
+    }
+
+    // ✅ Check if wallet has enough coins
+    if (wallet.totalCoin < Number(coins)) {
+      return res.status(400).json({
+        success: false,
+        message: "Insufficient coins in wallet",
+      });
+    }
+
+    // ✅ Deduct coins from wallet
+    wallet.totalCoin -= Number(coins);
+    await wallet.save();
+
+    // ✅ Save transaction (status auto-handled by schema for sellCoinRequest)
+    const transaction = await Transaction.create({
+      transactionType: "sellCoinRequest",
+      userId: wallet.userId || null,
+      coin: Number(coins),
+      fromWallet: wallet._id,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Sell coin request submitted successfully",
+      wallet,
+      transaction,
+    });
+  } catch (error) {
+    console.error("Error in sellCoinRequest:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};

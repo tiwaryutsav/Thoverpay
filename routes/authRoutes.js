@@ -89,4 +89,7 @@ router.get("/get_userdata",protect,authController.getCurrentUserDetails);
 router.get("/get-kyc-user",protect,authController.getMyKycDetails);
 router.post("/create-wallet-user",protect,authController.createWalletForUser);
 router.post("/add-codes",protect,authController.checkAndRegenerateRedeemCodes);
+router.post("/add-account",protect,authController.addAccountDetails);
+router.post("/buy-coins",protect,authController.buyCoins);
+router.post('/sell-coin', protect, authController.sellCoinRequest);
 export default router;
